@@ -19,7 +19,7 @@ from titan_demo import (
 def _reset_distributed():
     """Tear down torch.distributed between tests so each test sets its own world_size.
 
-    setup_fake_distributed is idempotent on ``is_initialized()``, so without
+    _setup_fake_distributed is idempotent on ``is_initialized()``, so without
     this fixture a later test would silently reuse the earlier world_size.
     """
     yield
