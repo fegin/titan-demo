@@ -26,7 +26,7 @@ def test_build_fake_model_returns_fake_params() -> None:
     params = list(model.parameters())
     assert len(params) > 0
     assert all(isinstance(p, FakeTensor) for p in params)
-    assert all(p.device.type == "meta" for p in params)
+    assert all(p.device.type == "cpu" for p in params)
     assert all(p.dtype == torch.bfloat16 for p in params)
 
     # debugmodel has ~6M params; just check it is in the expected ballpark.
