@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import torch
-from torch._subclasses.fake_tensor import FakeTensor
 
 from titan_demo import build_fake_model, make_model_spec
+from torch._subclasses.fake_tensor import FakeTensor
 
 
 def test_make_model_spec_returns_unbuilt_config() -> None:

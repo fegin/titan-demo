@@ -155,8 +155,10 @@ def format_sharding_config(
                 ("lm_head", config.lm_head),
             ],
         ),
-        (f"Layer {layer_id} (all other layers share this plan)",
-         _layer_entries(config, layer_id)),
+        (
+            f"Layer {layer_id} (all other layers share this plan)",
+            _layer_entries(config, layer_id),
+        ),
     ]
 
     out: list[str] = []
