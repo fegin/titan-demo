@@ -73,7 +73,7 @@ The estimate models **eager training** memory: TorchTitan's standard config comp
 
 If you run real training with full-model ``torch.compile`` enabled, fused MLP / norm kernels can drop some of the intermediates we count, so the actual peak may be **lower** than this estimate. The demo does not model that.
 
-The ``OptState`` category lands on cpu in the raw tracker snapshot (an artifact of fake AdamW). The notebook helper rewrites it to a deterministic ``local_params * 12`` bytes (AdamW master + exp_avg + exp_avg_sq, fp32) and attributes it to the GPU device.
+The ``OptState`` category lands on cpu in the raw tracker snapshot (an artifact of fake AdamW). The notebook helper rewrites it to a deterministic ``local_params * 12`` bytes (AdamW master + exp_avg + exp_avg_sq, fp32) and attributes it to the rank's compute device, which under FakeTensorMode is reported as cpu (it would be cuda in real training).
 
 ## Notebook
 
