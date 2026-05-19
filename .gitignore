@@ -1,4 +1,6 @@
-# Claude Code project notes (private)
+# Each contributor keeps a local CLAUDE.md with project notes for
+# Claude Code (their own working state, design context, in-flight TODOs).
+# It is deliberately not part of the committed source tree.
 CLAUDE.md
 
 # Python bytecode and cache
