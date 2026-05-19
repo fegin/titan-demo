@@ -21,6 +21,15 @@ dependencies = []
 [project.optional-dependencies]
 notebook = ["pandas", "matplotlib"]
 test = ["pytest"]
+lint = [
+    "pre-commit",
+    "ufmt==2.3.0",
+    "black==22.12.0",
+    "usort==1.0.5",
+    "flake8==7.1.1",
+    "flake8-bugbear",
+    "pep8-naming",
+]
 
 [tool.setuptools.packages.find]
 include = ["titan_demo*"]

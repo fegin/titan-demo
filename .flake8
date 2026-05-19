@@ -1,0 +1,19 @@
+[flake8]
+# Subset of torchtitan's flake8 config, dropping plugin prefixes (NU, P, T4)
+# we do not install and ignores that were torchtitan-internal tech debt.
+select = B,C,E,F,N,W,B9
+max-line-length = 120
+# E203, E501, W503, W504: required for black compatibility (B950 from B9
+#   handles the effective line-length check).
+# C408: we like the dict(a=1) keyword-argument syntax.
+# E731: assigning lambdas is allowed.
+# N803, N806, N812, N817: PyTorch naming conventions
+#   (e.g. import torch.nn.functional as F, DistributedDataParallel as DDP,
+#   caps and mixed case in function params).
+ignore =
+    E203,E501,W503,W504,C408,E731,N803,N806,N812,N817
+exclude =
+    ./.git,
+    ./build,
+    ./venv,
+    *.pyi
