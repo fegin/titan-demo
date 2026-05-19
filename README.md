@@ -60,17 +60,23 @@ print_memory_estimate(snap, units="MiB")
 Parameters and activations are FakeTensors. No real memory is
 allocated, so 70B and 405B builds finish in seconds on a single CPU.
 
+## Notebook
+
+`notebooks/parallelism_explorer.ipynb` walks through three scenarios (8B on 8 GPUs, 70B on 128 GPUs, 405B on 1024 GPUs) with interactive widgets for `tp`, `cp`, `dp_replicate`, `batch_size`, `seq_len`. Pick a config, click "Run Interact", and see whether it FITS, is NEAR OOM (>=95% of per-GPU budget), or OOMs. Install the notebook extra (`pip install -e .[notebook]`) to get `ipywidgets`. CP under fake mode relies on the patches described below.
+
 ## What the memory estimate represents
 
 The estimate models **eager training** memory: TorchTitan's standard config compiles only the FlexAttention kernel; the rest of the model (MLP, RMSNorm, etc.) runs eager, and our estimator measures the activations those eager ops allocate.
+
+Under FakeTensorMode the FlexAttention call goes through its registered fake impl, which allocates just the outputs (output + lse). That matches what the real Triton flex_attention kernel allocates -- no quadratic ``(B, H, S, S)`` intermediate in either case.
 
 If you run real training with full-model ``torch.compile`` enabled, fused MLP / norm kernels can drop some of the intermediates we count, so the actual peak may be **lower** than this estimate. The demo does not model that.
 
 The ``OptState`` category lands on cpu in the raw tracker snapshot (an artifact of fake AdamW). The notebook helper rewrites it to a deterministic ``local_params * 12`` bytes (AdamW master + exp_avg + exp_avg_sq, fp32) and attributes it to the GPU device.
 
-## Notebook
+## Monkey-patches
 
-`notebooks/parallelism_explorer.ipynb` walks through three scenarios (8B on 8 GPUs, 70B on 128 GPUs, 405B on 1024 GPUs) with interactive widgets for `tp`, `dp_replicate`, `batch_size`, `seq_len`. Pick a config, click "Run Interact", and see whether it FITS, is NEAR OOM (>=95% of per-GPU budget), or OOMs. Install the notebook extra (`pip install -e .[notebook]`) to get `ipywidgets`. Context Parallel (`cp > 1`) is not yet supported under fake mode -- see the notebook's "Limitations" section.
+``titan_demo/_patches.py`` applies five PyTorch patches and one TorchTitan patch on import. They are needed only when Context Parallel (``cp > 1``) is enabled under FakeTensorMode. See the module docstring for the full list: ``_StridedShard.local_shard_size_and_offset`` ``.tolist()``; ``FSDPMemTracker`` HOO + infra-mode support; ``ModTracker`` ``GraphModule`` skip; ``FlexAttention._compiled_flex_attn`` fake-mode bypass; ``_gen_transform_infos_non_cached`` Dijkstra short-circuit for ``_StridedShard`` (avoids the strategy-enumeration hang on TP + CP combos). The patches are idempotent and a no-op outside ``FakeTensorMode``.
 
 ## Layout
 

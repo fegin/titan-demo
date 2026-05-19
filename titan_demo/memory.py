@@ -70,8 +70,10 @@ def estimate_memory(
         batch_size: Per-rank input batch size. The DP axes shard the
             global batch, so the global batch is
             ``batch_size * dp_replicate * dp_shard``.
-        seq_len: Fake input sequence length. Must be
-            ``<= model.rope.max_seq_len`` set via ``make_model_spec``.
+        seq_len: **Global** sequence length. With CP, each rank holds
+            ``seq_len // cp`` tokens locally. Must be the same value
+            passed to ``make_model_spec`` (used as
+            ``model.rope.max_seq_len``).
         optimizer_cls: Optimizer class to instantiate over
             ``model.parameters()``. Defaults to AdamW. Choice affects the
             ``OptState`` category (Adam needs 2 fp32 states per param;
@@ -87,10 +89,21 @@ def estimate_memory(
     """
     optimizer_kwargs = optimizer_kwargs or {"lr": 1e-3}
 
+    if seq_len % parallel_dims.cp != 0:
+        raise ValueError(
+            f"seq_len={seq_len} not divisible by cp={parallel_dims.cp}; "
+            "Context Parallel requires the global sequence to split evenly."
+        )
+    local_seq = seq_len // parallel_dims.cp
+
     with fake_mode:
         optimizer = optimizer_cls(model.parameters(), **optimizer_kwargs)
 
-        tokens = torch.empty((batch_size, seq_len), dtype=torch.long)
+        # Per-rank local shard: dp axes already shard the batch, cp axis
+        # shards the sequence. parallelize_inputs.from_local wraps these
+        # as a DTensor whose global shape is
+        # ``(batch_size * dp_total, seq_len)``.
+        tokens = torch.empty((batch_size, local_seq), dtype=torch.long)
         if not isinstance(tokens, FakeTensor):
             tokens = fake_mode.from_tensor(tokens)
         # parallelize_inputs wants (inputs, labels) -- we reuse tokens for
