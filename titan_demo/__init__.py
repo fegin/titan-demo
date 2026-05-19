@@ -1,0 +1,14 @@
+"""titan_demo: scripts and APIs for demonstrating TorchTitan parallelism."""
+
+from titan_demo.fake_model import build_fake_model, make_model_spec
+from titan_demo.parallelize import make_parallel_dims, parallelize_fake_model
+from titan_demo.sharding import format_sharding_config, print_sharding_config
+
+__all__ = [
+    "build_fake_model",
+    "format_sharding_config",
+    "make_model_spec",
+    "make_parallel_dims",
+    "parallelize_fake_model",
+    "print_sharding_config",
+]
