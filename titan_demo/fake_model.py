@@ -35,7 +35,7 @@ from torchtitan.protocols.model import BaseModel
 from torchtitan.protocols.model_spec import ModelSpec
 
 
-__all__ = ["make_model_spec", "build_fake_model", "run_forward"]
+__all__ = ["make_model_spec", "build_fake_model"]
 
 
 @contextmanager
@@ -118,8 +118,7 @@ def make_model_spec(
         flavor: One of ``"debugmodel"``, ``"1B"``, ``"3B"``, ``"8B"``,
             ``"70B"``, ``"405B"``. See ``torchtitan.models.llama3.llama3_configs``.
         seq_len: Sets ``spec.model.rope.max_seq_len`` so the RoPE cache is
-            large enough for the planned forward pass. Pass the largest
-            ``seq_len`` you intend to feed to ``run_forward``.
+            large enough for the planned forward pass.
         attn_backend: ``"sdpa"``, ``"flex"``, or ``"varlen"``.
         loss_parallel: If True (default), shard the output projection along
             the vocab dimension. Same toggle as
@@ -153,8 +152,8 @@ def build_fake_model(
         dtype: Default dtype for parameters and buffers.
 
     Returns:
-        ``(model, fake_mode)``. Pass ``fake_mode`` to ``run_forward`` so
-        the forward pass uses the same mode.
+        ``(model, fake_mode)``. Pass ``fake_mode`` to downstream callers
+        (e.g. ``estimate_memory``) so the forward pass uses the same mode.
     """
     fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
 
@@ -163,36 +162,5 @@ def build_fake_model(
 
     with fake_mode:
         _fakeify_module_tensors(model, fake_mode)
-    model.eval()
 
     return model, fake_mode
-
-
-def run_forward(
-    model: nn.Module,
-    fake_mode: FakeTensorMode,
-    *,
-    batch_size: int = 1,
-    seq_len: int = 2048,
-) -> torch.Tensor:
-    """Run a forward pass with fake token inputs.
-
-    Inputs are integer token ids on the meta device, wrapped as
-    FakeTensors. The returned logits are also FakeTensors -- only
-    their shape and dtype are real.
-
-    Args:
-        model: A model built by ``build_fake_model``.
-        fake_mode: The ``FakeTensorMode`` returned by ``build_fake_model``.
-        batch_size: Batch size for the fake input.
-        seq_len: Sequence length for the fake input. Must be
-            ``<= model.rope.max_seq_len`` (set via ``make_model_spec``).
-
-    Returns:
-        The model's output (logits) as a FakeTensor.
-    """
-    with fake_mode, torch.no_grad():
-        tokens = torch.empty((batch_size, seq_len), dtype=torch.long)
-        if not isinstance(tokens, FakeTensor):
-            tokens = fake_mode.from_tensor(tokens)
-        return model(tokens)
