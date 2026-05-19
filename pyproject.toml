@@ -19,7 +19,7 @@ authors = [{ name = "Chien-Chin Huang" }]
 dependencies = []
 
 [project.optional-dependencies]
-notebook = ["pandas", "matplotlib"]
+notebook = ["ipywidgets"]
 test = ["pytest"]
 lint = [
     "pre-commit",
