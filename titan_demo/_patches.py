@@ -55,12 +55,33 @@ Issues addressed:
    was skipped, and downstream ops like ``lm_head``'s backward
    matmul saw shape mismatches.
 
+7. ``torchtitan.tools.utils.device_type`` defaults to ``"cuda"`` even
+   when no CUDA driver is installed (the fallback hard-codes ``"cuda"``
+   when ``_get_available_device_type()`` returns ``None``). On a
+   CPU-only host (Colab default, plain laptop) this makes
+   ``init_device_mesh("cuda", ...)`` crash before our fake mesh can
+   be built. We detect ``torch.cuda.is_available() == False`` and
+   rewrite ``device_type`` to ``"cpu"`` in every module that imported
+   it (the symbol is bound at import time, so the canonical
+   ``torchtitan.tools.utils`` copy alone isn't enough).
+
+8. ``torch.nn.attention.flex_attention._validate_device`` raises
+   ``NotImplementedError`` when the query is on CPU and any of q/k/v
+   has ``requires_grad=True`` (the real Triton backward isn't
+   implemented for CPU). On CPU-only hosts the FakeTensors land on
+   cpu, so even the fake-impl path that we route to in patch (5)
+   trips this check before doing any actual compute. Under fake mode
+   the validation is unnecessary -- the registered fake impl just
+   allocates outputs and never runs a backward kernel. We no-op
+   ``_validate_device`` when an active fake mode is present.
+
 The patches are read-only over the patched call sites' semantics: they
 only redirect dispatch and skip phantom modules. Real-device runs that
 import ``titan_demo`` get patch (1) (a no-op outside FakeTensorMode),
 patch (5) (also a no-op outside FakeTensorMode), patch (6) (also
-gated on fake mode), and (2)-(4) only take effect inside
-``FSDPMemTracker`` contexts.
+gated on fake mode), patch (7) (only triggers on CPU-only hosts),
+patch (8) (also gated on fake mode), and (2)-(4) only take effect
+inside ``FSDPMemTracker`` contexts.
 """
 
 from __future__ import annotations
@@ -78,11 +99,49 @@ def apply_patches() -> None:
         return
     _APPLIED = True
 
+    _patch_device_type_for_cpu_hosts()
     _patch_strided_shard()
     _patch_fsdp_mem_tracker()
     _patch_mod_tracker()
     _patch_flex_attention()
+    _patch_flex_attention_validate_device()
     _patch_redistribute_cost()
+
+
+def _patch_device_type_for_cpu_hosts() -> None:
+    """On CPU-only hosts, force torchtitan's ``device_type`` to ``"cpu"``."""
+    if torch.cuda.is_available():
+        return
+
+    import torchtitan.distributed.parallel_dims as _parallel_dims
+    import torchtitan.tools.utils as _tt_utils
+
+    cpu_module = torch.cpu
+    # Rewrite both the canonical module attribute and every eagerly-bound
+    # copy on importer modules. ``device_module`` consumers in metrics /
+    # distributed.utils don't fire on the fake path, but rewrite them
+    # too for consistency in case they ever do.
+    for mod in (_tt_utils, _parallel_dims):
+        if hasattr(mod, "device_type"):
+            mod.device_type = "cpu"
+        if hasattr(mod, "device_module"):
+            mod.device_module = cpu_module
+
+    # Lazy-import the other two consumers so we don't pull torchtitan
+    # internals unless they're already loaded.
+    import sys
+
+    for name in (
+        "torchtitan.distributed.utils",
+        "torchtitan.components.metrics",
+    ):
+        mod = sys.modules.get(name)
+        if mod is None:
+            continue
+        if hasattr(mod, "device_type"):
+            mod.device_type = "cpu"
+        if hasattr(mod, "device_module"):
+            mod.device_module = cpu_module
 
 
 def _patch_strided_shard() -> None:
@@ -178,6 +237,23 @@ def _patch_flex_attention() -> None:
         return orig_compiled(*args, **kwargs)
 
     FlexAttention._compiled_flex_attn = staticmethod(dispatch)
+
+
+def _patch_flex_attention_validate_device() -> None:
+    """No-op ``_validate_device`` under fake mode so CPU + requires_grad works."""
+    from torch._guards import active_fake_mode
+    from torch.nn.attention import flex_attention as _fa
+
+    orig = _fa._validate_device
+
+    def patched(query, key, value):
+        if active_fake_mode():
+            # Fake impl only allocates output shapes; never runs the
+            # backward kernel that the CPU restriction is guarding.
+            return
+        return orig(query, key, value)
+
+    _fa._validate_device = patched
 
 
 def _patch_redistribute_cost() -> None:
