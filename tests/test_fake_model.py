@@ -40,13 +40,13 @@ def test_user_can_modify_config_before_build() -> None:
     """The split API lets users edit sharding/config between the two steps."""
     spec = make_model_spec("debugmodel", seq_len=128)
 
-    # Sanity-check a representative sharding slot is reachable for modification
-    # (set_llama3_sharding_config has not been called yet, so it is the
-    # default left by model_registry -- which may be None).
+    # make_model_spec already installed defaults via
+    # set_llama3_sharding_config; verify the sharding_config slot is
+    # reachable, then overwrite it with a custom plan to simulate a user
+    # tweaking the config between make_model_spec and build_fake_model.
     layer = spec.model.layers[0]
     assert hasattr(layer.attention, "sharding_config")
 
-    # Pretend the user installed a custom sharding plan.
     from torchtitan.models.llama3.sharding import set_llama3_sharding_config
 
     set_llama3_sharding_config(spec.model, loss_parallel=True, enable_sp=True)
