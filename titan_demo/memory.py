@@ -13,9 +13,12 @@ loads at import time.
 
 from __future__ import annotations
 
+from enum import Enum
+from typing import Any
+
 import torch
 import torch.nn as nn
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
 
 from torchtitan.distributed.full_dtensor import parallelize_inputs
@@ -31,13 +34,17 @@ _UNITS = {"B": 1, "KiB": 1024, "MiB": 1024**2, "GiB": 1024**3}
 # Category key emitted by ``MemTracker`` for the per-device row total.
 _TOTAL_KEY = "Total"
 
+# Column widths for format_memory_estimate.
+_NAME_COL = 18
+_VALUE_COL = 10
+
 
 def _category_name(key: object) -> str:
     """Render a snapshot key (enum or plain string) as a readable label."""
     # ``MemTracker`` keys categories with ``_FSDPRefType`` enum members
     # whose values are the human-readable names ("Sharded Param", "OptState"
     # etc.). The "Total" row uses a plain string instead.
-    return key.value if hasattr(key, "value") else str(key)
+    return key.value if isinstance(key, Enum) else str(key)
 
 
 def estimate_memory(
@@ -48,7 +55,7 @@ def estimate_memory(
     batch_size: int = 1,
     seq_len: int = 2048,
     optimizer_cls: type[torch.optim.Optimizer] = torch.optim.AdamW,
-    optimizer_kwargs: dict | None = None,
+    optimizer_kwargs: dict[str, Any] | None = None,
 ) -> dict[torch.device, dict[str, int]]:
     """Run one fake training step and return the peak memory snapshot.
 
@@ -85,14 +92,12 @@ def estimate_memory(
         ``All Gather``, ``Reduce Scatter``, ``OptState``, ``Inputs``,
         plus the row total under ``"Total"``.
     """
-    optimizer_kwargs = optimizer_kwargs or {"lr": 1e-3}
+    optimizer_kwargs = {"lr": 1e-3} if optimizer_kwargs is None else optimizer_kwargs
 
     with fake_mode:
         optimizer = optimizer_cls(model.parameters(), **optimizer_kwargs)
 
         tokens = torch.empty((batch_size, seq_len), dtype=torch.long)
-        if not isinstance(tokens, FakeTensor):
-            tokens = fake_mode.from_tensor(tokens)
         # parallelize_inputs wants (inputs, labels) -- we reuse tokens for
         # labels and discard the wrapped labels.
         tokens_dt, _, _ = parallelize_inputs(parallel_dims, tokens, tokens, {})
@@ -136,10 +141,14 @@ def format_memory_estimate(
         ]
         non_total.sort(key=lambda kv: -kv[1])
         for name, bytes_val in non_total:
-            lines.append(f"  {name:<18} : {bytes_val / factor:>10.2f} {units}")
+            lines.append(
+                f"  {name:<{_NAME_COL}} : {bytes_val / factor:>{_VALUE_COL}.2f} {units}"
+            )
         total = breakdown.get(_TOTAL_KEY, 0)
-        lines.append(f"  {'-' * 18}   {'-' * 10}")
-        lines.append(f"  {'Total':<18} : {total / factor:>10.2f} {units}")
+        lines.append(f"  {'-' * _NAME_COL}   {'-' * _VALUE_COL}")
+        lines.append(
+            f"  {'Total':<{_NAME_COL}} : {total / factor:>{_VALUE_COL}.2f} {units}"
+        )
         lines.append("")
     return "\n".join(lines).rstrip()
 

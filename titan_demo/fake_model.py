@@ -27,7 +27,7 @@ from typing import Iterator
 
 import torch
 from torch import nn
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torchtitan.models.llama3 import model_registry
 from torchtitan.models.llama3.sharding import set_llama3_sharding_config
@@ -52,44 +52,6 @@ def _default_dtype(dtype: torch.dtype) -> Iterator[None]:
         yield
     finally:
         torch.set_default_dtype(old_dtype)
-
-
-def _fakeify_module_tensors(module: nn.Module, fake_mode: FakeTensorMode) -> None:
-    """Convert all params and buffers to FakeTensors, sharing aliases.
-
-    Models built under ``torch.device("meta")`` already have meta-device
-    parameters, but those are not FakeTensors and do not participate in
-    FakeTensorMode's shape/dtype propagation during forward. We swap
-    them in-place so that running forward inside ``fake_mode`` produces
-    FakeTensor activations end-to-end.
-
-    Shared parameters (e.g., weight-tied ``tok_embeddings`` and
-    ``lm_head``) are detected by Python ``id()`` and only converted
-    once so the alias survives.
-    """
-    memo: dict[int, torch.Tensor] = {}
-
-    def as_fake(tensor: torch.Tensor) -> torch.Tensor:
-        if isinstance(tensor, FakeTensor):
-            return tensor
-        key = id(tensor)
-        if key not in memo:
-            memo[key] = fake_mode.from_tensor(tensor)
-        return memo[key]
-
-    for child in module.modules():
-        for name, param in list(child._parameters.items()):
-            if param is None:
-                continue
-            fake_param = as_fake(param)
-            if fake_param is not param:
-                child._parameters[name] = nn.Parameter(
-                    fake_param, requires_grad=param.requires_grad
-                )
-        for name, buffer in list(child._buffers.items()):
-            if buffer is None:
-                continue
-            child._buffers[name] = as_fake(buffer)
 
 
 def make_model_spec(
@@ -158,8 +120,5 @@ def build_fake_model(
 
     with fake_mode, _default_dtype(dtype):
         model = model_config.build()
-
-    with fake_mode:
-        _fakeify_module_tensors(model, fake_mode)
 
     return model, fake_mode
