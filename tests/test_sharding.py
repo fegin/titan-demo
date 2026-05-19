@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import torch
-
 from titan_demo import format_sharding_config, make_model_spec
 
 
