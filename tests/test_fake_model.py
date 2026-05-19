@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import torch
-from torch._subclasses.fake_tensor import FakeTensor
 
 from titan_demo import build_fake_model, make_model_spec, run_forward
+from torch._subclasses.fake_tensor import FakeTensor
 
 
 def test_make_model_spec_returns_unbuilt_config() -> None:
@@ -63,9 +63,7 @@ def test_run_forward_returns_expected_logits_shape() -> None:
 
     batch_size = 2
     seq_len = 64
-    logits = run_forward(
-        model, fake_mode, batch_size=batch_size, seq_len=seq_len
-    )
+    logits = run_forward(model, fake_mode, batch_size=batch_size, seq_len=seq_len)
 
     assert isinstance(logits, FakeTensor)
     # debugmodel vocab_size = 2048

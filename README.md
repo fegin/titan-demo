@@ -70,3 +70,17 @@ pyproject.toml     pip-installable metadata
 pip install -e .[test]
 pytest
 ```
+
+## Lint and format
+
+Mirrors TorchTitan's setup (subset): ``ufmt`` (black + usort) and
+``flake8`` with ``flake8-bugbear`` + ``pep8-naming``.
+
+```bash
+pip install -e .[lint]
+pre-commit install            # auto-run on commit
+pre-commit run --all-files    # one-shot
+# or directly:
+ufmt format titan_demo tests
+flake8 titan_demo tests --config=.flake8
+```

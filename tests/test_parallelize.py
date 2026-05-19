@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 import torch
 import torch.distributed as dist
-from torch.distributed.tensor import DTensor
 
 from titan_demo import (
     build_fake_model,
@@ -13,6 +12,7 @@ from titan_demo import (
     make_parallel_dims,
     parallelize_fake_model,
 )
+from torch.distributed.tensor import DTensor
 
 
 @pytest.fixture(autouse=True)
