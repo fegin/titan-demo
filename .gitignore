@@ -1,0 +1,38 @@
+# Claude Code project notes (private)
+CLAUDE.md
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Packaging
+*.egg-info/
+build/
+dist/
+*.egg
+pip-wheel-metadata/
+
+# Editors
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtualenvs
+.venv/
+venv/
+env/
