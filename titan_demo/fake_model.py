@@ -100,7 +100,6 @@ def make_model_spec(
       - ``spec.model``: the ``Llama3Model.Config`` -- modify this to set
         sharding declarations, swap inner attention, change vocab size, etc.
       - ``spec.name`` / ``spec.flavor``: identifiers for logging.
-      - ``spec.parallelize_fn``: the legacy parallelize callable.
 
     Default sharding configs are installed via ``set_llama3_sharding_config``
     so the spec is ready to feed to ``parallelize_fake_model``. Users can
