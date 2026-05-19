@@ -23,6 +23,7 @@ from titan_demo import (
     make_parallel_dims,
     parallelize_fake_model,
 )
+from titan_demo.memory import _category_name
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +33,7 @@ def _reset_distributed():
         dist.destroy_process_group()
 
 
-def test_estimate_memory_returns_expected_categories():
+def test_estimate_memory_returns_expected_categories() -> None:
     spec = make_model_spec("debugmodel", seq_len=128)
     model, fake_mode = build_fake_model(spec.model, dtype=torch.bfloat16)
     pd = make_parallel_dims(world_size=8, tp=2)
@@ -48,13 +49,13 @@ def test_estimate_memory_returns_expected_categories():
     for breakdown in snap.values():
         for key in breakdown:
             if key != "Total":
-                names.add(key.value if hasattr(key, "value") else str(key))
+                names.add(_category_name(key))
 
     for required in ("Sharded Param", "Sharded Grad", "Activation", "OptState"):
         assert required in names, f"missing category {required!r} in {names}"
 
 
-def _toy_snapshot():
+def _toy_snapshot() -> dict[torch.device, dict[str, int]]:
     """A hand-built snapshot in the format that ``estimate_memory`` returns."""
     return {
         torch.device("cuda:0"): {
@@ -70,7 +71,7 @@ def _toy_snapshot():
     }
 
 
-def test_format_skips_zero_rows_and_shows_total():
+def test_format_skips_zero_rows_and_shows_total() -> None:
     out = format_memory_estimate(_toy_snapshot(), units="MiB")
 
     assert "Sharded Param" in out
@@ -82,6 +83,6 @@ def test_format_skips_zero_rows_and_shows_total():
     assert out.count("Total") == 2
 
 
-def test_format_unit_validation():
+def test_format_unit_validation() -> None:
     with pytest.raises(ValueError):
         format_memory_estimate({}, units="not_a_unit")
