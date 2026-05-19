@@ -20,6 +20,8 @@ from titan_demo import (
     build_fake_model,
     make_parallel_dims,
     parallelize_fake_model,
+    estimate_memory,
+    print_memory_estimate,
     run_forward,
 )
 
@@ -47,14 +49,16 @@ parallel_dims = make_parallel_dims(world_size=8, tp=2)  # -> dp_shard=4
 #    process group of size world_size on first call.
 parallelize_fake_model(model, spec=spec, parallel_dims=parallel_dims)
 
-# 6. Run a forward pass with fake tokens.
-logits = run_forward(model, fake_mode, batch_size=2, seq_len=64)
-print("logits:", tuple(logits.shape), logits.dtype)
+# 6. Estimate per-rank peak memory (params, grads, opt-state, acts,
+#    all-gather / reduce-scatter buffers). Internally runs one full
+#    fake training step (forward + backward + AdamW.step) under
+#    torch.distributed._tools.fsdp2_mem_tracker.FSDPMemTracker.
+snap = estimate_memory(model, fake_mode, parallel_dims, batch_size=2, seq_len=64)
+print_memory_estimate(snap, units="MiB")
 ```
 
-Parameters and activations are FakeTensors on the meta device. No real
-memory is allocated, so 70B and 405B builds finish in seconds on a
-single CPU.
+Parameters and activations are FakeTensors. No real memory is
+allocated, so 70B and 405B builds finish in seconds on a single CPU.
 
 ## Layout
 

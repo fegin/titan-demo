@@ -26,7 +26,7 @@ def test_build_fake_model_returns_fake_params() -> None:
     params = list(model.parameters())
     assert len(params) > 0
     assert all(isinstance(p, FakeTensor) for p in params)
-    assert all(p.device.type == "meta" for p in params)
+    assert all(p.device.type == "cpu" for p in params)
     assert all(p.dtype == torch.bfloat16 for p in params)
 
     # debugmodel has ~6M params; just check it is in the expected ballpark.
@@ -69,4 +69,4 @@ def test_run_forward_returns_expected_logits_shape() -> None:
     # debugmodel vocab_size = 2048
     assert tuple(logits.shape) == (batch_size, seq_len, 2048)
     assert logits.dtype == torch.bfloat16
-    assert logits.device.type == "meta"
+    assert logits.device.type == "cpu"

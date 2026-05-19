@@ -5,6 +5,12 @@ on a CPU-only machine (e.g., Colab) and large flavors like 70B or 405B
 fit in seconds. Only shape and dtype metadata is tracked; values are
 never materialized.
 
+Parameters land on the cpu device (as FakeTensors). We deliberately do
+**not** combine FakeTensorMode with ``torch.device("meta")`` even though
+both achieve "no real allocation": FSDP's ``_validate_no_meta_params``
+refuses meta-device params, which would block ``parallelize_fake_model``
+and ``estimate_memory``.
+
 The build is split into two steps so users can inspect or modify the
 model config (sharding declarations, parallelism options, attention
 backend, etc.) before any parameters are allocated:
@@ -152,7 +158,7 @@ def build_fake_model(
     """
     fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
 
-    with fake_mode, torch.device("meta"), _default_dtype(dtype):
+    with fake_mode, _default_dtype(dtype):
         model = model_config.build()
 
     with fake_mode:
@@ -186,7 +192,7 @@ def run_forward(
         The model's output (logits) as a FakeTensor.
     """
     with fake_mode, torch.no_grad():
-        tokens = torch.empty((batch_size, seq_len), dtype=torch.long, device="meta")
+        tokens = torch.empty((batch_size, seq_len), dtype=torch.long)
         if not isinstance(tokens, FakeTensor):
             tokens = fake_mode.from_tensor(tokens)
         return model(tokens)
