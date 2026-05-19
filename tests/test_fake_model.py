@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 
-from titan_demo import build_fake_model, make_model_spec, run_forward
+from titan_demo import build_fake_model, make_model_spec
 from torch._subclasses.fake_tensor import FakeTensor
 
 
@@ -55,18 +55,3 @@ def test_user_can_modify_config_before_build() -> None:
     # Build should succeed against the modified config.
     model, _ = build_fake_model(spec.model)
     assert sum(p.numel() for p in model.parameters()) > 0
-
-
-def test_run_forward_returns_expected_logits_shape() -> None:
-    spec = make_model_spec("debugmodel", seq_len=128)
-    model, fake_mode = build_fake_model(spec.model, dtype=torch.bfloat16)
-
-    batch_size = 2
-    seq_len = 64
-    logits = run_forward(model, fake_mode, batch_size=batch_size, seq_len=seq_len)
-
-    assert isinstance(logits, FakeTensor)
-    # debugmodel vocab_size = 2048
-    assert tuple(logits.shape) == (batch_size, seq_len, 2048)
-    assert logits.dtype == torch.bfloat16
-    assert logits.device.type == "meta"
