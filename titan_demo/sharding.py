@@ -18,6 +18,7 @@ from typing import Any
 from torch.distributed.tensor import Partial, Placement, Replicate, Shard
 
 from torchtitan.models.common.attention import QKVLinear
+from torchtitan.protocols.model import BaseModel
 from torchtitan.protocols.model_spec import ModelSpec
 from torchtitan.protocols.sharding import ShardingConfig
 from torchtitan.protocols.types import NamedPlacement
@@ -131,7 +132,7 @@ def _layer_entries(config: Any, layer_id: int) -> list[tuple[str, Any]]:
 
 
 def format_sharding_config(
-    spec_or_config: ModelSpec | Any, *, layer_id: int = 0
+    spec_or_config: ModelSpec | BaseModel.Config, *, layer_id: int = 0
 ) -> str:
     """Return the printable sharding-config snapshot as a string.
 
@@ -173,7 +174,7 @@ def format_sharding_config(
 
 
 def print_sharding_config(
-    spec_or_config: ModelSpec | Any, *, layer_id: int = 0
+    spec_or_config: ModelSpec | BaseModel.Config, *, layer_id: int = 0
 ) -> None:
     """Print the sharding-config snapshot for root, embedding/loss, and one layer."""
     print(format_sharding_config(spec_or_config, layer_id=layer_id))
