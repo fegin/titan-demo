@@ -36,7 +36,7 @@ def test_estimate_memory_returns_expected_categories():
     spec = make_model_spec("debugmodel", seq_len=128)
     model, fake_mode = build_fake_model(spec.model, dtype=torch.bfloat16)
     pd = make_parallel_dims(world_size=8, tp=2)
-    parallelize_fake_model(model, spec=spec, parallel_dims=pd)
+    parallelize_fake_model(model, parallel_dims=pd)
 
     snap = estimate_memory(model, fake_mode, pd, batch_size=2, seq_len=64)
 
