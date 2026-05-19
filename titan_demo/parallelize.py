@@ -32,7 +32,7 @@ from torchtitan.models.llama3.parallelize import apply_fsdp
 from torchtitan.protocols.model_spec import ModelSpec
 
 
-__all__ = ["make_parallel_dims", "setup_fake_distributed", "parallelize_fake_model"]
+__all__ = ["make_parallel_dims", "parallelize_fake_model"]
 
 
 def make_parallel_dims(
@@ -65,7 +65,7 @@ def make_parallel_dims(
     )
 
 
-def setup_fake_distributed(world_size: int) -> None:
+def _setup_fake_distributed(world_size: int) -> None:
     """Initialize a ``"fake"`` process group of size ``world_size``.
 
     Idempotent: returns immediately if ``torch.distributed`` is already
@@ -100,7 +100,7 @@ def parallelize_fake_model(
     Returns:
         The same ``model`` (mutated in place), for convenience.
     """
-    setup_fake_distributed(parallel_dims.world_size)
+    _setup_fake_distributed(parallel_dims.world_size)
     parallel_dims.build_mesh()
 
     validate_config(parallel_dims, model)
