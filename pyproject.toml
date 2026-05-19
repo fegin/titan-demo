@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "titan_demo"
+version = "0.0.1"
+description = "Scripts and APIs for demonstrating TorchTitan parallelism."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "BSD-3-Clause" }
+authors = [{ name = "Chien-Chin Huang" }]
+
+# torch and torchtitan are intentionally not listed here.
+# Notebooks install them via the PyTorch nightly index and a torchtitan
+# git URL because PyPI does not yet publish a compatible torchtitan
+# wheel. Adding them here would let pip resolve to the stable PyPI
+# torch, which is older than the nightly TorchTitan needs.
+dependencies = []
+
+[project.optional-dependencies]
+notebook = ["pandas", "matplotlib"]
+test = ["pytest"]
+lint = [
+    "pre-commit",
+    "ufmt==2.3.0",
+    "black==22.12.0",
+    "usort==1.0.5",
+    "flake8",
+    "flake8-bugbear",
+    "pep8-naming",
+]
+
+[tool.setuptools.packages.find]
+include = ["titan_demo*"]
+exclude = ["tests*"]
