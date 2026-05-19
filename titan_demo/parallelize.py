@@ -5,7 +5,7 @@ Workflow:
     spec = make_model_spec("debugmodel", seq_len=128)
     model, fake_mode = build_fake_model(spec.model)
     parallel_dims = make_parallel_dims(world_size=8, tp=2)
-    parallelize_fake_model(model, spec=spec, parallel_dims=parallel_dims)
+    parallelize_fake_model(model, parallel_dims=parallel_dims)
 
 ``parallelize_fake_model`` mutates ``model`` in place:
   1. (One-shot) initializes a ``"fake"`` process group of size
@@ -29,7 +29,6 @@ from torch import nn
 from torchtitan.distributed.full_dtensor import resolve_fsdp_mesh, validate_config
 from torchtitan.distributed.parallel_dims import ParallelDims
 from torchtitan.models.llama3.parallelize import apply_fsdp
-from torchtitan.protocols.model_spec import ModelSpec
 
 
 __all__ = ["make_parallel_dims", "parallelize_fake_model"]
@@ -68,11 +67,22 @@ def make_parallel_dims(
 def _setup_fake_distributed(world_size: int) -> None:
     """Initialize a ``"fake"`` process group of size ``world_size``.
 
-    Idempotent: returns immediately if ``torch.distributed`` is already
-    initialized. Always uses ``rank=0`` because everything runs in one
-    Python process; the fake backend does not actually transfer data.
+    If ``torch.distributed`` is already initialized, the existing world size
+    must match the requested one -- otherwise we raise rather than silently
+    reuse a mismatched process group (a common footgun when users try to
+    switch scenarios without restarting the kernel). Always uses ``rank=0``
+    because everything runs in one Python process; the fake backend does
+    not actually transfer data.
     """
     if dist.is_initialized():
+        existing = dist.get_world_size()
+        if existing != world_size:
+            raise RuntimeError(
+                f"torch.distributed is already initialized with "
+                f"world_size={existing}, but world_size={world_size} was "
+                f"requested. Restart the kernel before switching to a "
+                f"scenario with a different world_size."
+            )
         return
     dist.init_process_group("fake", rank=0, world_size=world_size)
 
@@ -80,7 +90,6 @@ def _setup_fake_distributed(world_size: int) -> None:
 def parallelize_fake_model(
     model: nn.Module,
     *,
-    spec: ModelSpec,
     parallel_dims: ParallelDims,
     param_dtype: torch.dtype = torch.bfloat16,
     reduce_dtype: torch.dtype = torch.float32,
@@ -90,9 +99,6 @@ def parallelize_fake_model(
 
     Args:
         model: Model returned by ``build_fake_model``.
-        spec: Reserved for future per-model FSDP dispatch (Qwen3,
-            DeepSeek-V3, etc.). Currently unused -- today the llama3
-            ``apply_fsdp`` is hard-coded.
         parallel_dims: Constructed via ``make_parallel_dims``.
         param_dtype: ``MixedPrecisionPolicy.param_dtype`` for FSDP.
         reduce_dtype: ``MixedPrecisionPolicy.reduce_dtype`` for FSDP.
@@ -101,8 +107,6 @@ def parallelize_fake_model(
     Returns:
         The same ``model`` (mutated in place), for convenience.
     """
-    del spec  # see docstring -- reserved for future per-model dispatch
-
     _setup_fake_distributed(parallel_dims.world_size)
     parallel_dims.build_mesh()
 
