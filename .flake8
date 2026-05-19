@@ -1,25 +1,19 @@
 [flake8]
-# Subset of torchtitan's flake8 config, dropping pytorch-specific rule sets
-# (TOR*) we do not pull in.
-select = B,C,E,F,N,NU,P,T4,W,B9
+# Subset of torchtitan's flake8 config, dropping plugin prefixes (NU, P, T4)
+# we do not install and ignores that were torchtitan-internal tech debt.
+select = B,C,E,F,N,W,B9
 max-line-length = 120
-# C408 ignored because we like the dict keyword argument syntax
-# E501 is not flexible enough, we're using B950 instead
-# N812 ignored because import torch.nn.functional as F is PyTorch convention
-# N817 ignored because importing using acronyms is convention (DistributedDataParallel as DDP)
-# E731 allow usage of assigning lambda expressions
-# N803,N806 allow caps and mixed case in function params.
+# E203, E501, W503, W504: required for black compatibility (B950 from B9
+#   handles the effective line-length check).
+# C408: we like the dict(a=1) keyword-argument syntax.
+# E731: assigning lambdas is allowed.
+# N803, N806, N812, N817: PyTorch naming conventions
+#   (e.g. import torch.nn.functional as F, DistributedDataParallel as DDP,
+#   caps and mixed case in function params).
 ignore =
-    E203,E305,E402,E501,E721,E741,F405,F821,F841,F999,W503,W504,C408,E302,W291,E303,N812,N817,E731,N803,N806
-    EXE001,
-    # these ignores are from flake8-bugbear; please fix!
-    B007,B008,
-optional-ascii-coding = True
+    E203,E501,W503,W504,C408,E731,N803,N806,N812,N817
 exclude =
     ./.git,
     ./build,
     ./venv,
-    *.pyi,
-    .pre-commit-config.yaml,
-    *.md,
-    .flake8
+    *.pyi
