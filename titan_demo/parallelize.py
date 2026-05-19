@@ -90,8 +90,9 @@ def parallelize_fake_model(
 
     Args:
         model: Model returned by ``build_fake_model``.
-        spec: Model spec returned by ``make_model_spec`` (used to dispatch
-            the per-model FSDP wrapper).
+        spec: Reserved for future per-model FSDP dispatch (Qwen3,
+            DeepSeek-V3, etc.). Currently unused -- today the llama3
+            ``apply_fsdp`` is hard-coded.
         parallel_dims: Constructed via ``make_parallel_dims``.
         param_dtype: ``MixedPrecisionPolicy.param_dtype`` for FSDP.
         reduce_dtype: ``MixedPrecisionPolicy.reduce_dtype`` for FSDP.
@@ -100,6 +101,8 @@ def parallelize_fake_model(
     Returns:
         The same ``model`` (mutated in place), for convenience.
     """
+    del spec  # see docstring -- reserved for future per-model dispatch
+
     setup_fake_distributed(parallel_dims.world_size)
     parallel_dims.build_mesh()
 
@@ -116,9 +119,5 @@ def parallelize_fake_model(
         cpu_offload=cpu_offload,
         dp_mesh_dims=dp_mesh_dims,
     )
-
-    # Suppress unused-arg warning -- spec is reserved for future per-model
-    # FSDP dispatch (Qwen3, DeepSeek-V3, etc.). Today we hard-code llama3.
-    del spec
 
     return model

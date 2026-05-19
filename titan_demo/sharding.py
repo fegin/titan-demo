@@ -52,33 +52,35 @@ def _fmt_sharding(sharding: ShardingConfig | None) -> list[str]:
         return ["  <no sharding_config>"]
 
     lines: list[str] = []
-    for name, np in sharding.state_shardings.items():
-        lines.append(_row(f"state.{name}", _fmt_named(np)))
+    for name, named_placement in sharding.state_shardings.items():
+        lines.append(_row(f"state.{name}", _fmt_named(named_placement)))
     if sharding.in_src_shardings:
-        for name, np in sharding.in_src_shardings.items():
-            lines.append(_row(f"in_src.{name}", _fmt_named(np)))
+        for name, named_placement in sharding.in_src_shardings.items():
+            lines.append(_row(f"in_src.{name}", _fmt_named(named_placement)))
     if sharding.in_dst_shardings:
-        for name, np in sharding.in_dst_shardings.items():
-            lines.append(_row(f"in_dst.{name}", _fmt_named(np)))
+        for name, named_placement in sharding.in_dst_shardings.items():
+            lines.append(_row(f"in_dst.{name}", _fmt_named(named_placement)))
     if sharding.out_src_shardings is not None:
         out_src = sharding.out_src_shardings
         if isinstance(out_src, tuple):
-            for i, np in enumerate(out_src):
-                lines.append(_row(f"out_src[{i}]", _fmt_named(np)))
+            for i, named_placement in enumerate(out_src):
+                lines.append(_row(f"out_src[{i}]", _fmt_named(named_placement)))
         else:
             lines.append(_row("out_src", _fmt_named(out_src)))
     if sharding.out_dst_shardings is not None:
         lines.append(_row("out_dst", _fmt_named(sharding.out_dst_shardings)))
     if sharding.local_input_grad_placements:
-        for name, np in sharding.local_input_grad_placements.items():
-            lines.append(_row(f"in_grad.{name}", _fmt_named(np)))
+        for name, named_placement in sharding.local_input_grad_placements.items():
+            lines.append(_row(f"in_grad.{name}", _fmt_named(named_placement)))
     if sharding.local_output_grad_placements is not None:
         lines.append(
             _row("out_grad", _fmt_named(sharding.local_output_grad_placements))
         )
     if sharding.local_map is not None:
-        for i, np in enumerate(sharding.local_map.in_grad_placements):
-            value = _fmt_named(np) if np is not None else "<None>"
+        for i, named_placement in enumerate(sharding.local_map.in_grad_placements):
+            value = (
+                _fmt_named(named_placement) if named_placement is not None else "<None>"
+            )
             lines.append(_row(f"local_map.in_grads[{i}]", value))
 
     if not lines:
