@@ -16,7 +16,7 @@ _WHEEL = "https://download-r2.pytorch.org/whl/nightly/cpu/torch-2.13.0.dev202605
 !pip uninstall torch -y
 !pip install $_WHEEL --force-reinstall --quiet --progress-bar off && echo "Installed torch."
 !pip install git+https://github.com/pytorch/torchtitan.git --force-reinstall --quiet --progress-bar off && echo "Installed torchtitan."
-!pip install git+https://github.com/<your-user>/titan-demo.git --force-reinstall --quiet --progress-bar off && echo "Installed titan-demo."
+!pip install git+https://github.com/fegin/titan-demo.git --force-reinstall --quiet --progress-bar off && echo "Installed titan-demo."
 ```
 
 ## Quick start
@@ -54,7 +54,7 @@ parallel_dims = make_parallel_dims(world_size=8, tp=2)  # -> dp_shard=4
 
 # 5. Apply TP/CP sharding + fully_shard wrapping. Auto-inits a fake
 #    process group of size world_size on first call.
-parallelize_fake_model(model, spec=spec, parallel_dims=parallel_dims)
+parallelize_fake_model(model, parallel_dims=parallel_dims)
 
 # 6. Estimate per-rank peak memory (params, grads, opt-state, acts,
 #    all-gather / reduce-scatter buffers). Internally runs one full
