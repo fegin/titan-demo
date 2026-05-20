@@ -71,6 +71,10 @@ allocated, so 70B and 405B builds finish in seconds on a single CPU.
 
 `notebooks/parallelism_explorer.ipynb` walks through three scenarios (8B on 8 GPUs, 70B on 128 GPUs, 405B on 1024 GPUs) with interactive widgets for `tp`, `cp`, `dp_replicate`, `batch_size`, `seq_len`. Pick a config, click "Run Interact", and see whether it FITS, is NEAR OOM (>=95% of per-GPU budget), or OOMs. Install the notebook extra (`pip install -e .[notebook]`) to get `ipywidgets`. CP under fake mode relies on the patches described below.
 
+## CLI
+
+`scripts/parallelism_explorer.py` is the same explorer as a standalone Python script. Defaults to 70B + FSDP + TP + CP on 128 GPUs x 80 GiB; every axis is overridable via flags (`--flavor`, `--world-size`, `--tp`, `--cp`, `--dp-replicate`, `--batch-size`, `--seq-len`, ...). Run `python scripts/parallelism_explorer.py --help` for the full list.
+
 ## What the memory estimate represents
 
 The estimate models **eager training** memory: TorchTitan's standard config compiles only the FlexAttention kernel; the rest of the model (MLP, RMSNorm, etc.) runs eager, and our estimator measures the activations those eager ops allocate.
