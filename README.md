@@ -83,7 +83,14 @@ The ``OptState`` category lands on cpu in the raw tracker snapshot (an artifact 
 
 ## Monkey-patches
 
-``titan_demo/_patches.py`` applies five PyTorch patches and one TorchTitan patch on import. They are needed only when Context Parallel (``cp > 1``) is enabled under FakeTensorMode. See the module docstring for the full list: ``_StridedShard.local_shard_size_and_offset`` ``.tolist()``; ``FSDPMemTracker`` HOO + infra-mode support; ``ModTracker`` ``GraphModule`` skip; ``FlexAttention._compiled_flex_attn`` fake-mode bypass; ``_gen_transform_infos_non_cached`` Dijkstra short-circuit for ``_StridedShard`` (avoids the strategy-enumeration hang on TP + CP combos). The patches are idempotent and a no-op outside ``FakeTensorMode``.
+``titan_demo/_patches.py`` applies five PyTorch patches and one TorchTitan patch on import. They are needed only when Context Parallel (``cp > 1``) is enabled under FakeTensorMode. The patches are idempotent and a no-op outside ``FakeTensorMode``. See the module docstring for full rationale; in short:
+
+- ``_StridedShard.local_shard_size_and_offset`` -- wrap ``.tolist()`` in ``unset_fake_temporarily`` so the internal ``torch.arange`` does not trip the data-dependent guard.
+- ``FSDPMemTracker`` HOO support -- advertise ``supports_higher_order_operators`` and handle HOOs in ``__torch_dispatch__`` so FlexAttention (a HOO) is tracked correctly.
+- ``FSDPMemTracker`` infra mode -- set ``is_infra_mode() = True`` so FlexAttention's internal ``torch.compile`` does not bail when the tracker is on the stack.
+- ``ModTracker`` -- skip ``torch.fx.GraphModule`` instances in the pre/post hooks so compile-generated modules do not corrupt the parent stack.
+- ``FlexAttention._compiled_flex_attn`` -- dispatch to eager ``flex_attention`` under fake mode (avoids the inductor lowering that has no CPU backend).
+- ``_gen_transform_infos_non_cached`` -- short-circuit Dijkstra for ``_StridedShard`` placements under fake mode (avoids the strategy-enumeration hang on TP + CP combos).
 
 ## Layout
 
