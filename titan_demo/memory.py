@@ -78,9 +78,9 @@ def estimate_memory(
             global batch, so the global batch is
             ``batch_size * dp_replicate * dp_shard``.
         seq_len: **Global** sequence length. With CP, each rank holds
-            ``seq_len // cp`` tokens locally. Must be the same value
-            passed to ``make_model_spec`` (used as
-            ``model.rope.max_seq_len``).
+            ``seq_len // cp`` tokens locally. Must be
+            ``<= model.rope.max_seq_len`` (the value passed to
+            ``make_model_spec``); equal is the typical case.
         optimizer_cls: Optimizer class to instantiate over
             ``model.parameters()``. Defaults to AdamW. Choice affects the
             ``OptState`` category (Adam needs 2 fp32 states per param;
@@ -96,20 +96,26 @@ def estimate_memory(
     """
     optimizer_kwargs = {"lr": 1e-3} if optimizer_kwargs is None else optimizer_kwargs
 
-    if seq_len % parallel_dims.cp != 0:
+    # Mirror torchtitan's ParallelDims.seq_len_divisor (tp * cp * 2)
+    # exactly: SP needs tp divisibility and CP needs 2*cp for load
+    # balancing. For cp=1 the factor of 2 is technically stricter than
+    # needed, but all realistic seq_len values (2048, 4096, ...) satisfy
+    # it and we want the same constraint torchtitan would enforce.
+    divisor = parallel_dims.tp * 2 * parallel_dims.cp
+    if seq_len % divisor != 0:
         raise ValueError(
-            f"seq_len={seq_len} not divisible by cp={parallel_dims.cp}; "
-            "Context Parallel requires the global sequence to split evenly."
+            f"seq_len={seq_len} not divisible by tp * 2 * cp = {divisor} "
+            f"(tp={parallel_dims.tp}, cp={parallel_dims.cp}); "
+            "SequenceParallel needs tp divisibility and CP needs 2*cp "
+            "for balanced sharding."
         )
     local_seq = seq_len // parallel_dims.cp
 
     with fake_mode:
         optimizer = optimizer_cls(model.parameters(), **optimizer_kwargs)
 
-        # Per-rank local shard: dp axes already shard the batch, cp axis
-        # shards the sequence. parallelize_inputs.from_local wraps these
-        # as a DTensor whose global shape is
-        # ``(batch_size * dp_total, seq_len)``.
+        # Per-rank local shard; parallelize_inputs wraps it via
+        # DTensor.from_local on the SPMD mesh.
         tokens = torch.empty((batch_size, local_seq), dtype=torch.long)
         # parallelize_inputs wants (inputs, labels) -- we reuse tokens for
         # labels and discard the wrapped labels.
