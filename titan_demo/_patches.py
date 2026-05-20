@@ -55,6 +55,26 @@ Issues addressed:
    was skipped, and downstream ops like ``lm_head``'s backward
    matmul saw shape mismatches.
 
+7. ``torchtitan.tools.utils.device_type`` defaults to ``"cuda"`` even
+   when no CUDA driver is installed (the fallback hard-codes ``"cuda"``
+   when ``_get_available_device_type()`` returns ``None``). On a
+   CPU-only host (Colab default, plain laptop) this makes
+   ``init_device_mesh("cuda", ...)`` crash before our fake mesh can
+   be built. We detect ``torch.cuda.is_available() == False`` and
+   rewrite ``device_type`` to ``"cpu"`` in every module that imported
+   it (the symbol is bound at import time, so the canonical
+   ``torchtitan.tools.utils`` copy alone isn't enough).
+
+8. ``torch.nn.attention.flex_attention._validate_device`` raises
+   ``NotImplementedError`` when the query is on CPU and any of q/k/v
+   has ``requires_grad=True`` (the real Triton backward isn't
+   implemented for CPU). On CPU-only hosts the FakeTensors land on
+   cpu, so even the fake-impl path that we route to in patch (5)
+   trips this check before doing any actual compute. Under fake mode
+   the validation is unnecessary -- the registered fake impl just
+   allocates outputs and never runs a backward kernel. We no-op
+   ``_validate_device`` when an active fake mode is present.
+
 The patches are read-only over the patched call sites' semantics: they
 only redirect dispatch and skip phantom modules. For real-device runs
 that import ``titan_demo``:
@@ -62,7 +82,9 @@ that import ``titan_demo``:
 - Patches (1) and (5) always wrap the call, but the wrapper
   (``unset_fake_temporarily()`` / ``active_fake_mode()`` check) makes
   them no-ops outside ``FakeTensorMode``.
-- Patch (6) is explicitly gated on ``active_fake_mode()``.
+- Patches (6) and (8) are explicitly gated on ``active_fake_mode()``.
+- Patch (7) only triggers on CPU-only hosts (``torch.cuda.is_available()
+  == False``); GPU hosts skip it entirely.
 - Patches (2) and (3) install permanent class-level changes on
   ``FSDPMemTracker``; they only affect code that uses
   ``FSDPMemTracker`` and are additive there (HOO support, infra-mode
@@ -87,11 +109,53 @@ def apply_patches() -> None:
         return
     _APPLIED = True
 
+    _patch_device_type_for_cpu_hosts()
     _patch_strided_shard()
     _patch_fsdp_mem_tracker()
     _patch_mod_tracker()
     _patch_flex_attention()
+    _patch_flex_attention_validate_device()
     _patch_redistribute_cost()
+
+
+def _patch_device_type_for_cpu_hosts() -> None:
+    """On CPU-only hosts, force torchtitan's ``device_type`` to ``"cpu"``.
+
+    Triggered when ``torch.cuda.is_available()`` returns False (e.g., Colab
+    CPU runtime, a laptop without a CUDA driver, or
+    ``CUDA_VISIBLE_DEVICES=""``). Only the string is rewritten; the
+    companion ``device_module`` symbol is left alone because ``torch.cpu``
+    does not expose the memory APIs (``memory_stats``, ``empty_cache``,
+    ``get_device_properties``, ...) that some torchtitan utilities call.
+    titan_demo's fake-mode path does not touch ``device_module``, so the
+    narrower rewrite is enough.
+    """
+    if torch.cuda.is_available():
+        return
+
+    import importlib
+    import sys
+
+    # Force-load the canonical site so any later ``from
+    # torchtitan.tools.utils import device_type`` picks up the rewritten
+    # value. ``parallel_dims`` is the main consumer titan_demo uses; pull
+    # it in eagerly so it lands in the sys.modules walk below even if no
+    # other titan_demo import has reached it yet.
+    importlib.import_module("torchtitan.tools.utils")
+    importlib.import_module("torchtitan.distributed.parallel_dims")
+
+    # Walk every loaded torchtitan module and rewrite eagerly-bound
+    # device_type copies (the ``from torchtitan.tools.utils import
+    # device_type`` pattern several torchtitan modules use). Walking
+    # sys.modules instead of maintaining a hand-coded list catches new
+    # torchtitan submodules automatically. The ``== "cuda"`` check
+    # avoids clobbering an unrelated future symbol that happens to be
+    # named device_type.
+    for name, mod in list(sys.modules.items()):
+        if mod is None or not name.startswith("torchtitan"):
+            continue
+        if getattr(mod, "device_type", None) == "cuda":
+            mod.device_type = "cpu"
 
 
 def _patch_strided_shard() -> None:
@@ -222,6 +286,23 @@ def _patch_flex_attention() -> None:
         return orig_compiled(*args, **kwargs)
 
     FlexAttention._compiled_flex_attn = staticmethod(dispatch)
+
+
+def _patch_flex_attention_validate_device() -> None:
+    """No-op ``_validate_device`` under fake mode so CPU + requires_grad works."""
+    from torch._guards import active_fake_mode
+    from torch.nn.attention import flex_attention as _fa
+
+    orig = _fa._validate_device
+
+    def patched(query, key, value):
+        if active_fake_mode():
+            # Fake impl only allocates output shapes; never runs the
+            # backward kernel that the CPU restriction is guarding.
+            return
+        return orig(query, key, value)
+
+    _fa._validate_device = patched
 
 
 def _patch_redistribute_cost() -> None:
