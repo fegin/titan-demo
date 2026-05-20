@@ -38,17 +38,22 @@ Issues addressed:
    inductor / triton, which has no CPU backend and crashes during
    autotuning.
 
-6. ``_gen_transform_infos_non_cached`` is forced down a graph-based
-   Dijkstra path whenever a placement set contains ``_StridedShard``.
-   For TP + CP combined, the strategy-enumeration loop in
-   ``expand_to_full_mesh_op_strategy`` calls this many times with
-   complex 2-axis placements, and the state space explodes (the call
-   never returns within tens of minutes on a 4-rank toy model). Under
-   fake mode we only need the post-redistribute *shape* to flow
-   correctly, not the actual minimum-cost transform sequence, so we
-   short-circuit Dijkstra with an empty transform list (giving
-   ``redistribute_cost == 0``, which is suboptimal for strategy
-   ranking but correct for shape propagation).
+6. ``redistribute_cost`` invokes a graph-based Dijkstra
+   (``generate_graph_based_transform_infos``) whenever a placement set
+   contains ``_StridedShard``. For TP + CP combined, the strategy
+   enumeration loop in ``expand_to_full_mesh_op_strategy`` calls it
+   many times with complex 2-axis placements and the state space
+   explodes (the call never returns within tens of minutes on a
+   4-rank toy model). Under fake mode the *cost* is only used to rank
+   candidate strategies; we short-circuit it to ``0.0`` for
+   ``_StridedShard`` cases so strategy ranking degrades to
+   first-viable-wins, but the execution-time redistribute path (a
+   separate cached entry point) still runs the full Dijkstra and
+   produces correct transforms. The earlier attempt that
+   short-circuited ``_gen_transform_infos_non_cached`` directly also
+   broke execution: empty transforms meant the actual redistribute
+   was skipped, and downstream ops like ``lm_head``'s backward
+   matmul saw shape mismatches.
 
 The patches are read-only over the patched call sites' semantics: they
 only redirect dispatch and skip phantom modules. For real-device runs
@@ -220,34 +225,45 @@ def _patch_flex_attention() -> None:
 
 
 def _patch_redistribute_cost() -> None:
-    """Short-circuit Dijkstra in ``_gen_transform_infos_non_cached`` for fake
-    runs that have ``_StridedShard`` placements (TP + CP combo).
-
-    The short-circuit affects both the cost-table path in
-    ``redistribute_cost`` and the actual ``redistribute_local_tensor`` path.
-    Empty transforms leave the local tensor unchanged, so the post-redistribute
-    local shape relies on the DTensor op-strategy output spec. Verified
-    end-to-end against 8B on TP=2 + CP=2 (FFN ``w1``/``w2`` outputs and the
-    QKV reshape) -- shapes propagate correctly.
-    """
+    """Short-circuit ``redistribute_cost`` for ``_StridedShard`` cases under
+    fake mode so strategy enumeration doesn't run the slow Dijkstra."""
     from torch._guards import active_fake_mode
-    from torch.distributed.tensor import _redistribute
+    from torch.distributed.tensor import _collective_utils, _utils
+    from torch.distributed.tensor._ops import utils as _ops_utils
     from torch.distributed.tensor.placement_types import _StridedShard
 
-    orig = _redistribute._gen_transform_infos_non_cached
+    orig = _collective_utils.redistribute_cost
 
-    def patched(src_spec, dst_spec, use_graph_based_transform=None):
+    # *args, **kwargs forward any future upstream additions to the
+    # redistribute_cost signature so they are not silently dropped.
+    def patched(current_spec, target_spec, *args, **kwargs):
         # Check active_fake_mode() first so real-device callers skip the
         # placement scan entirely.
         if active_fake_mode() and any(
             isinstance(p, _StridedShard)
-            for p in (*src_spec.placements, *dst_spec.placements)
+            for p in (*current_spec.placements, *target_spec.placements)
         ):
-            # Empty transform list -> redistribute_cost returns 0. Strategy
-            # ranking degrades to "first viable wins"; the actual local
-            # shape comes from the output op-strategy spec, not from
-            # these transforms.
-            return []
-        return orig(src_spec, dst_spec, use_graph_based_transform)
+            # Cost is only used to rank candidate strategies in
+            # expand_to_full_mesh_op_strategy. Returning 0 makes all
+            # _StridedShard strategies tie at zero; _select_min_cost_strategy
+            # still prefers a no-redistribute strategy when one is available,
+            # otherwise falls back to the first zero-cost candidate. The
+            # actual redistribute happens through a separate cached entry
+            # point in DTensor's dispatch path, which still runs the full
+            # Dijkstra and produces correct transforms.
+            return 0.0
+        return orig(current_spec, target_spec, *args, **kwargs)
 
-    _redistribute._gen_transform_infos_non_cached = patched
+    # Patch the canonical definition plus every module that does
+    # ``from ... import redistribute_cost`` at module load:
+    #   _collective_utils  -- canonical site (also catches qualified callers)
+    #   _ops.utils         -- used during op-strategy enumeration
+    #   _utils             -- used by ExplicitRedistributionContext;
+    #                          with fake mode + _StridedShard, this means
+    #                          observe_redistribution silently allows the
+    #                          redistribute (0.0 <= 0). Acceptable for our
+    #                          fake-mode use case; if ExplicitRedistribution
+    #                          becomes load-bearing under fake mode, revisit.
+    _collective_utils.redistribute_cost = patched
+    _ops_utils.redistribute_cost = patched
+    _utils.redistribute_cost = patched
