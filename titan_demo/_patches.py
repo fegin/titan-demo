@@ -305,13 +305,15 @@ def _patch_redistribute_cost() -> None:
     """Short-circuit ``redistribute_cost`` for ``_StridedShard`` cases under
     fake mode so strategy enumeration doesn't run the slow Dijkstra."""
     from torch._guards import active_fake_mode
-    from torch.distributed.tensor import _collective_utils
+    from torch.distributed.tensor import _collective_utils, _utils
     from torch.distributed.tensor._ops import utils as _ops_utils
     from torch.distributed.tensor.placement_types import _StridedShard
 
     orig = _collective_utils.redistribute_cost
 
-    def patched(current_spec, target_spec):
+    # *args, **kwargs forward any future upstream additions to the
+    # redistribute_cost signature so they are not silently dropped.
+    def patched(current_spec, target_spec, *args, **kwargs):
         # Check active_fake_mode() first so real-device callers skip the
         # placement scan entirely.
         if active_fake_mode() and any(
@@ -320,15 +322,25 @@ def _patch_redistribute_cost() -> None:
         ):
             # Cost is only used to rank candidate strategies in
             # expand_to_full_mesh_op_strategy. Returning 0 makes all
-            # _StridedShard strategies tie (first-viable-wins). The
-            # actual redistribute happens through a separate cached
-            # entry point in DTensor's dispatch path, which still runs
-            # the full Dijkstra and produces correct transforms.
+            # _StridedShard strategies tie at zero; _select_min_cost_strategy
+            # still prefers a no-redistribute strategy when one is available,
+            # otherwise falls back to the first zero-cost candidate. The
+            # actual redistribute happens through a separate cached entry
+            # point in DTensor's dispatch path, which still runs the full
+            # Dijkstra and produces correct transforms.
             return 0.0
-        return orig(current_spec, target_spec)
+        return orig(current_spec, target_spec, *args, **kwargs)
 
-    # Patch both the canonical definition and the eagerly-bound copy on
-    # the call-site module (_ops.utils does
-    # ``from ... import redistribute_cost`` at module level).
+    # Patch the canonical definition plus every module that does
+    # ``from ... import redistribute_cost`` at module load:
+    #   _collective_utils  -- canonical site (also catches qualified callers)
+    #   _ops.utils         -- used during op-strategy enumeration
+    #   _utils             -- used by ExplicitRedistributionContext;
+    #                          with fake mode + _StridedShard, this means
+    #                          observe_redistribution silently allows the
+    #                          redistribute (0.0 <= 0). Acceptable for our
+    #                          fake-mode use case; if ExplicitRedistribution
+    #                          becomes load-bearing under fake mode, revisit.
     _collective_utils.redistribute_cost = patched
     _ops_utils.redistribute_cost = patched
+    _utils.redistribute_cost = patched

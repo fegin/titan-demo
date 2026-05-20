@@ -4,9 +4,9 @@ This test exercises every patch in ``titan_demo/_patches.py`` end-to-end:
 HOO dispatch in ``FSDPMemTracker``, the ``ModTracker`` ``GraphModule`` skip,
 ``_StridedShard.local_shard_size_and_offset`` ``.tolist()`` bypass, the
 eager-``flex_attention`` dispatch in TorchTitan's ``FlexAttention``, and
-the Dijkstra short-circuit in ``_gen_transform_infos_non_cached``. If any
-of those patches stops working after a PyTorch or TorchTitan upgrade,
-this test should fail.
+the ``redistribute_cost`` short-circuit that avoids the Dijkstra blow-up
+on ``_StridedShard`` placements. If any of those patches stops working
+after a PyTorch or TorchTitan upgrade, this test should fail.
 
 Lives in its own file (not ``test_memory.py``) because PyTorch's FSDP
 mesh caches survive ``destroy_process_group``, so we only run one full
