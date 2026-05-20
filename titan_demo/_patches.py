@@ -56,11 +56,20 @@ Issues addressed:
    matmul saw shape mismatches.
 
 The patches are read-only over the patched call sites' semantics: they
-only redirect dispatch and skip phantom modules. Real-device runs that
-import ``titan_demo`` get patch (1) (a no-op outside FakeTensorMode),
-patch (5) (also a no-op outside FakeTensorMode), patch (6) (also
-gated on fake mode), and (2)-(4) only take effect inside
-``FSDPMemTracker`` contexts.
+only redirect dispatch and skip phantom modules. For real-device runs
+that import ``titan_demo``:
+
+- Patches (1) and (5) always wrap the call, but the wrapper
+  (``unset_fake_temporarily()`` / ``active_fake_mode()`` check) makes
+  them no-ops outside ``FakeTensorMode``.
+- Patch (6) is explicitly gated on ``active_fake_mode()``.
+- Patches (2) and (3) install permanent class-level changes on
+  ``FSDPMemTracker``; they only affect code that uses
+  ``FSDPMemTracker`` and are additive there (HOO support, infra-mode
+  flag).
+- Patch (4) installs a permanent class-level change on ``ModTracker``
+  but only fires for ``torch.fx.GraphModule`` instances, which are a
+  compile-only artifact and never appear in plain ``ModTracker`` use.
 """
 
 from __future__ import annotations
@@ -87,29 +96,51 @@ def apply_patches() -> None:
 
 def _patch_strided_shard() -> None:
     """Wrap ``_StridedShard.local_shard_size_and_offset`` in unset_fake."""
+    from torch._guards import active_fake_mode
     from torch._subclasses.fake_tensor import unset_fake_temporarily
     from torch.distributed.tensor.placement_types import _StridedShard
 
     orig = _StridedShard.local_shard_size_and_offset
 
     def patched(self, *args, **kwargs):
-        with unset_fake_temporarily():
-            return orig(self, *args, **kwargs)
+        # Gate on active_fake_mode so real-device runs (every Linear when
+        # CP is in play) skip the context-manager overhead entirely.
+        if active_fake_mode():
+            with unset_fake_temporarily():
+                return orig(self, *args, **kwargs)
+        return orig(self, *args, **kwargs)
 
     _StridedShard.local_shard_size_and_offset = patched
 
 
 def _patch_fsdp_mem_tracker() -> None:
     """Teach ``FSDPMemTracker`` to accept HOOs and act as an infra mode."""
-    from torch.distributed._tools.fsdp2_mem_tracker import _FSDPRefType, FSDPMemTracker
+    from functools import partial
+
+    from torch.distributed._tools.fsdp2_mem_tracker import (
+        _FSDPModState,
+        _FSDPRefType,
+        FSDPMemTracker,
+    )
+    from torch.distributed.tensor import DTensor
     from torch.utils._pytree import tree_map_only
 
     FSDPMemTracker.supports_higher_order_operators = True
-    FSDPMemTracker.is_infra_mode = classmethod(lambda cls: True)
+    FSDPMemTracker.is_infra_mode = classmethod(lambda _cls: True)
 
     orig_dispatch = FSDPMemTracker.__torch_dispatch__
 
+    # args=... (Ellipsis) matches FSDPMemTracker's upstream signature:
+    #   def __torch_dispatch__(self, func, types, args=..., kwargs=None)
+    # It is the upstream default, not a placeholder.
     def patched_dispatch(self, func, types, args=..., kwargs=None):
+        # Mirror upstream: let DTensor desugar first if it is on the stack.
+        # FlexAttention currently unwraps before the HOO fires, so this is
+        # not exercised today, but skipping the check would silently
+        # diverge from the upstream contract for any future HOO that runs
+        # while DTensor is still a subclass.
+        if any(t == DTensor for t in types):
+            return NotImplemented
         if isinstance(func, torch._ops.HigherOrderOperator):
             # Snapshot ModTracker state so AOT autograd queued during the
             # HOO cannot reset it under us. The GraphModule skip in
@@ -123,16 +154,29 @@ def _patch_fsdp_mem_tracker() -> None:
                 self._mod_tracker.parents = saved_parents
                 self._mod_tracker._active_module_cnt = saved_active
 
-            reftype = (
-                _FSDPRefType.TEMP
-                if self._mod_tracker.is_bw and not self._in_ac
-                else _FSDPRefType.ACT
+            # Mirror the three-branch reftype selection from the upstream
+            # __torch_dispatch__ so a future HOO inside optimizer.step gets
+            # categorized as OptState, not Activation.
+            if self._in_opt:
+                reftype = _FSDPRefType.OPT
+            elif self._mod_tracker.is_bw and not self._in_ac:
+                reftype = _FSDPRefType.TEMP
+            else:
+                reftype = _FSDPRefType.ACT
+            # Use _track (the same call upstream __torch_dispatch__ makes)
+            # so storage-size changes via _update_snap(SIZE, ...) are picked
+            # up; _update_and_maybe_create_winfos only reacts to reftype
+            # changes and would miss an in-place HOO storage resize.
+            tree_map_only(torch.Tensor, partial(self._track, reftype), res)
+            # Refresh the peak snapshot like the upstream non-HOO path
+            # does; without this, a HOO that allocates the high-water
+            # mark would not update the peak until the next regular op.
+            peak_state = (
+                _FSDPModState.PEAK_BW
+                if self._mod_tracker.is_bw
+                else _FSDPModState.PEAK_FW
             )
-            tree_map_only(
-                torch.Tensor,
-                lambda t: self._update_and_maybe_create_winfos(t, reftype),
-                res,
-            )
+            self._update_peak_stats(peak_state)
             return res
         return orig_dispatch(self, func, types, args, kwargs)
 
@@ -191,11 +235,12 @@ def _patch_redistribute_cost() -> None:
     orig = _collective_utils.redistribute_cost
 
     def patched(current_spec, target_spec):
-        has_strided = any(
+        # Check active_fake_mode() first so real-device callers skip the
+        # placement scan entirely.
+        if active_fake_mode() and any(
             isinstance(p, _StridedShard)
             for p in (*current_spec.placements, *target_spec.placements)
-        )
-        if active_fake_mode() and has_strided:
+        ):
             # Cost is only used to rank candidate strategies in
             # expand_to_full_mesh_op_strategy. Returning 0 makes all
             # _StridedShard strategies tie (first-viable-wins). The
