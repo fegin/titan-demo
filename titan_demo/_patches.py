@@ -119,39 +119,43 @@ def apply_patches() -> None:
 
 
 def _patch_device_type_for_cpu_hosts() -> None:
-    """On CPU-only hosts, force torchtitan's ``device_type`` to ``"cpu"``."""
+    """On CPU-only hosts, force torchtitan's ``device_type`` to ``"cpu"``.
+
+    Triggered when ``torch.cuda.is_available()`` returns False (e.g., Colab
+    CPU runtime, a laptop without a CUDA driver, or
+    ``CUDA_VISIBLE_DEVICES=""``). Only the string is rewritten; the
+    companion ``device_module`` symbol is left alone because ``torch.cpu``
+    does not expose the memory APIs (``memory_stats``, ``empty_cache``,
+    ``get_device_properties``, ...) that some torchtitan utilities call.
+    titan_demo's fake-mode path does not touch ``device_module``, so the
+    narrower rewrite is enough.
+    """
     if torch.cuda.is_available():
         return
 
-    import torchtitan.distributed.parallel_dims as _parallel_dims
-    import torchtitan.tools.utils as _tt_utils
-
-    cpu_module = torch.cpu
-    # Rewrite both the canonical module attribute and every eagerly-bound
-    # copy on importer modules. ``device_module`` consumers in metrics /
-    # distributed.utils don't fire on the fake path, but rewrite them
-    # too for consistency in case they ever do.
-    for mod in (_tt_utils, _parallel_dims):
-        if hasattr(mod, "device_type"):
-            mod.device_type = "cpu"
-        if hasattr(mod, "device_module"):
-            mod.device_module = cpu_module
-
-    # Lazy-import the other two consumers so we don't pull torchtitan
-    # internals unless they're already loaded.
+    import importlib
     import sys
 
-    for name in (
-        "torchtitan.distributed.utils",
-        "torchtitan.components.metrics",
-    ):
-        mod = sys.modules.get(name)
-        if mod is None:
+    # Force-load the canonical site so any later ``from
+    # torchtitan.tools.utils import device_type`` picks up the rewritten
+    # value. ``parallel_dims`` is the main consumer titan_demo uses; pull
+    # it in eagerly so it lands in the sys.modules walk below even if no
+    # other titan_demo import has reached it yet.
+    importlib.import_module("torchtitan.tools.utils")
+    importlib.import_module("torchtitan.distributed.parallel_dims")
+
+    # Walk every loaded torchtitan module and rewrite eagerly-bound
+    # device_type copies (the ``from torchtitan.tools.utils import
+    # device_type`` pattern several torchtitan modules use). Walking
+    # sys.modules instead of maintaining a hand-coded list catches new
+    # torchtitan submodules automatically. The ``== "cuda"`` check
+    # avoids clobbering an unrelated future symbol that happens to be
+    # named device_type.
+    for name, mod in list(sys.modules.items()):
+        if mod is None or not name.startswith("torchtitan"):
             continue
-        if hasattr(mod, "device_type"):
+        if getattr(mod, "device_type", None) == "cuda":
             mod.device_type = "cpu"
-        if hasattr(mod, "device_module"):
-            mod.device_module = cpu_module
 
 
 def _patch_strided_shard() -> None:
