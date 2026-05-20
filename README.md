@@ -90,7 +90,7 @@ The ``OptState`` category lands on cpu in the raw tracker snapshot (an artifact 
 - ``FSDPMemTracker`` infra mode -- set ``is_infra_mode() = True`` so FlexAttention's internal ``torch.compile`` does not bail when the tracker is on the stack.
 - ``ModTracker`` -- skip ``torch.fx.GraphModule`` instances in the pre/post hooks so compile-generated modules do not corrupt the parent stack.
 - ``FlexAttention._compiled_flex_attn`` -- dispatch to eager ``flex_attention`` under fake mode (avoids the inductor lowering that has no CPU backend).
-- ``_gen_transform_infos_non_cached`` -- short-circuit Dijkstra for ``_StridedShard`` placements under fake mode (avoids the strategy-enumeration hang on TP + CP combos).
+- ``redistribute_cost`` -- short-circuit to ``0.0`` for ``_StridedShard`` placements under fake mode so strategy enumeration doesn't run the slow Dijkstra (avoids the hang on TP + CP combos). The execution-time transforms still go through the full path and produce correct shapes.
 
 ## Layout
 
