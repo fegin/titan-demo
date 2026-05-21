@@ -64,6 +64,25 @@ def make_parallel_dims(
     )
 
 
+def _clear_dtensor_dispatch_cache() -> None:
+    """Clear the C++ DTensor sharding-propagation cache.
+
+    PyTorch's C++ fast-path for DTensor dispatch caches ``OutputSharding``
+    results keyed by ``DTensorSpec`` hash.  ``DeviceMesh`` hashes by
+    *value* (topology), not identity, so a new mesh with the same shape as
+    a previous one produces a cache hit whose ``OutputSharding`` still
+    references the **old** mesh object.  ``nn.Parameter(dtensor)`` then
+    calls ``.detach()``, which goes through this cache and returns a
+    DTensor whose ``_spec.mesh`` is the stale mesh.  FSDP's identity
+    check (``spmd_mesh is not self.mesh_info.spmd_mesh``) subsequently
+    fails.
+
+    Clearing the cache forces a fresh propagation that picks up the
+    current mesh objects.  See https://github.com/pytorch/pytorch/issues/169814
+    """
+    torch._C._clear_DTensor_sharding_propagator_cache()
+
+
 def _setup_fake_distributed(world_size: int) -> None:
     """Initialize a ``"fake"`` process group of size ``world_size``.
 
@@ -107,6 +126,7 @@ def parallelize_fake_model(
     Returns:
         The same ``model`` (mutated in place), for convenience.
     """
+    _clear_dtensor_dispatch_cache()
     _setup_fake_distributed(parallel_dims.world_size)
     parallel_dims.build_mesh()
 

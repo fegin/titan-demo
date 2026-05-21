@@ -1,14 +1,4 @@
-"""Smoke tests for ``titan_demo.parallelize_fake_model``.
-
-A note on test scope: PyTorch's FSDP / DTensor stack holds mesh
-references in module-level caches that survive ``destroy_process_group``,
-which trips an identity-check inside FSDP when ``fully_shard`` is
-called a second time with what should be an equivalent mesh. We
-therefore only exercise the FSDP code path once in this file
-(``test_fsdp_only_shards_params_to_dtensor``); the 2-D ``tp + dp_shard``
-case is covered by ``test_estimate_memory_returns_expected_categories``
-in ``test_memory.py``, which is the only other FSDP-touching test.
-"""
+"""Smoke tests for ``titan_demo.parallelize_fake_model``."""
 
 from __future__ import annotations
 
